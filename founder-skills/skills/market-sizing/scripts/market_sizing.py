@@ -937,6 +937,38 @@ def _keep_unit_rejections(
         print(f"Warning: could not record the unit refusal: {exc}", file=sys.stderr)
 
 
+def _keep_base_rejections(output: str | None, run_id: str | None, refusals: list[dict[str, Any]]) -> None:
+    """Append each share a base check refused, with the `of` it was refused with, to an append-only list.
+
+    The refusal is what tempts a rewrite of `of` to the base, and a rewrite that drops the proxy passes as a
+    match the stamp cannot tell from research. Kept, the population the share was first recorded as measured
+    on is still known; `_view.sizing_integrity` reports a sizing that uses the share under another one.
+    """
+    rows = [
+        {"param": r.get("param"), "share": share, "of": of, "code": r.get("code")}
+        for r in refusals
+        for share, of in sorted(_provenance._as_dict(r.get("shares")).items())
+    ]
+    if not output or not run_id or not rows:
+        return
+    d = os.path.join(os.path.dirname(os.path.abspath(output)), "handoff", run_id)
+    path = os.path.join(d, "base_rejections.json")
+    try:
+        os.makedirs(d, exist_ok=True)
+        existing: list[Any] = []
+        if os.path.exists(path):
+            with open(path, encoding="utf-8") as fh:
+                loaded = json.load(fh)
+            existing = loaded if isinstance(loaded, list) else []
+        for row in rows:
+            if row not in existing:
+                existing.append(row)
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(existing, fh, indent=2)
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"Warning: could not record the share refusal: {exc}", file=sys.stderr)
+
+
 def _resolve_references(
     data: dict[str, Any], args: argparse.Namespace, approach: str
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], list[dict[str, Any]], list[str], Any]:
@@ -1008,6 +1040,7 @@ def _resolve_references(
         if prior is not None:
             args.base_checks, base_refusals = _provenance.check_bases(resolved, validation, prior)
             refusals = refusals + base_refusals
+            _keep_base_rejections(args.output, args.run_id, base_refusals)
     for r in refusals:
         errors.append(f"{r['code']}: {r['param']}: {r['message']} (remedy: {r['remedy_kind']})")
     numeric = dict(data)

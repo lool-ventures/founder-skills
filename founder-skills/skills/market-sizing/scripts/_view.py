@@ -1002,6 +1002,7 @@ INTEGRITY_REMEDY: dict[str, str] = {
     "SIZING_ALTERED": "disclose",
     "RECORD_CHANGED_AFTER_REVIEW": "restore_to_baseline",
     "UNIT_CHANGED_AFTER_REJECTION": "disclose",
+    "POPULATION_CHANGED_AFTER_REJECTION": "disclose",
     # Re-piping the sensitivity is legitimate: its ranges are relative to the base, and the base now
     # comes from the sizing itself, so nothing about the answer is chosen by the one re-running it.
     "SENSITIVITY_STALE": "producer_rerun",
@@ -1258,7 +1259,75 @@ def sizing_integrity(
                     f"when it is relabelled; check this figure before relying on the result.",
                 )
             )
+    codes.extend(_population_changes(analysis_dir, run_id, sizing, validation, used))
     return render, codes
+
+
+def _base_rejections(analysis_dir: str, run_id: str | None) -> list[dict[str, Any]]:
+    if not run_id:
+        return []
+    path = _os.path.join(analysis_dir, "handoff", run_id, "base_rejections.json")
+    try:
+        with open(path, encoding="utf-8") as fh:
+            rows = _json.load(fh)
+    except (OSError, ValueError):
+        return []
+    return [r for r in rows if isinstance(r, dict)] if isinstance(rows, list) else []
+
+
+def _population_changes(
+    analysis_dir: str, run_id: str | None, sizing: dict[str, Any], validation: Any, used: set[Any]
+) -> list[tuple[str, str]]:
+    """Each share the base check refused that the sizing now uses under another `of`.
+
+    `of` is the record's word for what the source measured, and the refusal is what tempts rewriting it to the
+    base; one rewrite that drops the proxy reads as a match. The exit the refusal itself offers is exempt: `of`
+    naming another share of the same step that is measured on the base (a chain, stamped as one). Compared with
+    the first `of` each share was refused with, so a second rewrite does not hide the first.
+    """
+    first: dict[str, dict[str, Any]] = {}
+    for row in _base_rejections(analysis_dir, run_id):
+        share = row.get("share")
+        if isinstance(share, str) and share not in first:
+            first[share] = row
+    if not first:
+        return []
+    by_name = {a.get("name"): a for a in _as_list(_as_dict(validation).get("assumptions")) if isinstance(a, dict)}
+    checks = _as_dict(sizing.get("base_checks"))
+
+    def _population(of: str) -> str:
+        return _label(of, validation) if of in by_name else _founder_prose(of)
+
+    out: list[tuple[str, str]] = []
+    for share, row in sorted(first.items()):
+        now = by_name.get(share)
+        if share not in used or not isinstance(now, dict):
+            continue
+        was_of, now_of = str(row.get("of") or "").strip(), str(now.get("of") or "").strip()
+        if not was_of or now_of == was_of:
+            continue
+        check = _as_dict(checks.get(str(row.get("param"))))
+        base_entries = {str(n) for n in _as_list(check.get("base_entries"))}
+        head = by_name.get(now_of)
+        if (
+            isinstance(head, dict)
+            and head is not now
+            and head.get("name") in used
+            and str(head.get("of") or "").strip() in base_entries
+        ):
+            continue  # the chain exit: measured on what a share of the base picks out
+        base = _label(str(check.get("base") or row.get("param") or ""), validation)
+        out.append(
+            (
+                "POPULATION_CHANGED_AFTER_REJECTION",
+                f"{_label(share, validation)}: the sizing refused to apply this share to {base}, because its "
+                f"record said it was measured on {_population(was_of)}. The record was then changed to say it was "
+                f"measured on {_population(now_of) if now_of else 'nothing'}, and the sizing uses it. What a "
+                f"source measured does not change when the record does; check this share before relying on "
+                f"the result.",
+            )
+        )
+    return out
 
 
 def _now_state(sizing: dict[str, Any], validation: Any, inputs: Any) -> dict[str, Any]:

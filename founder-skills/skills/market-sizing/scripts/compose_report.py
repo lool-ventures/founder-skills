@@ -236,6 +236,7 @@ WARNING_SEVERITY: dict[str, str] = {
     "SIZING_ALTERED": "high",
     "RECORD_CHANGED_AFTER_REVIEW": "high",
     "UNIT_CHANGED_AFTER_REJECTION": "high",
+    "POPULATION_CHANGED_AFTER_REJECTION": "high",
     "SENSITIVITY_STALE": "high",
     # Medium on purpose: the self-check is judgement, so it can only be re-graded, and a high code
     # here would reward forging the stamp over re-dispatching.
@@ -390,6 +391,7 @@ WARNING_LABELS: dict[str, str] = {
     "SIZING_ALTERED": "The Saved Calculation Was Changed After It Was Calculated",
     "RECORD_CHANGED_AFTER_REVIEW": "Research Changed After The Outside Review",
     "UNIT_CHANGED_AFTER_REJECTION": "A Figure Was Relabelled After It Was Refused",
+    "POPULATION_CHANGED_AFTER_REJECTION": "A Share's Population Was Changed After It Was Refused",
     "SENSITIVITY_STALE": "The Sensitivity Table Is From A Different Sizing",
     "CHECKLIST_STALE": "The Self-Check Is From A Different Sizing",
     "SIZING_NOT_CHECKED": "The Figures Were Not Taken From The Research",

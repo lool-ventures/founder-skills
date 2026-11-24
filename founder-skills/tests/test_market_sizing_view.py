@@ -299,7 +299,7 @@ def test_every_code_this_subsystem_adds_has_a_remedy_that_changes_nothing_it_che
     legitimate = {"producer_rerun", "redispatch", "founder_question", "restore_to_baseline", "disclose"}
     assert legitimate <= prov.REMEDY_KINDS
     codes = view.INTEGRITY_REMEDY
-    assert len(codes) == 10, sorted(codes)  # non-vacuity: every code this subsystem raises is listed
+    assert len(codes) == 11, sorted(codes)  # non-vacuity: every code this subsystem raises is listed
     for code, remedy in codes.items():
         assert remedy in legitimate, (code, remedy)
         assert code in compose.WARNING_SEVERITY, f"{code} has no severity"

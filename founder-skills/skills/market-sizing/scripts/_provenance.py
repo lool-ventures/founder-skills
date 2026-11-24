@@ -767,7 +767,9 @@ def check_bases(
     the planned formula, and after a refusal with the pairing in front of it; on a revision it could be rewritten
     to match (after the outside review, `record_snapshot` names that edit). The review is what can attack it.
     Only the rewrite that keeps a proxy is refused (`E_RATE_BASE_PROXY_SELF`: `of` on the base and a proxy for
-    it); one that drops the proxy reads as a match.
+    it); one that drops the proxy reads as a match here. After a refusal, `market_sizing.py` keeps the refused
+    `of` and `_view` reports the sizing that uses the share under another; a rewrite before any refusal, or
+    with that file deleted or a fresh run id, is not seen.
     Also unchecked, each recorded in the stamp so the mix of outcomes shows it: a share or a base turned into an
     estimate or the founder's own figure. Compared by name, not population: a base of a count times a ratio
     (accounts times seats per account) matches a share of the count. A `proxy.why` is not judged, only
@@ -895,6 +897,7 @@ def check_bases(
                         '"why": "<why this share is a fair proxy for it>"}.'
                     ),
                     "remedy_kind": "record_research",
+                    "shares": {n: ofs[n] for n in bad},
                 }
             )
             continue
@@ -945,6 +948,7 @@ def _self_proxy(
             + "Then keep the `proxy` only if that population is not the base's."
         ),
         "remedy_kind": "record_research",
+        "shares": {n: ofs[n] for n in selfish},
     }
 
 

@@ -1010,13 +1010,13 @@ re-running fix it?**
 - **About the review itself** (`REDTEAM_ALTERED`, `REVIEW_COPY_MISSING`, `RED_TEAM_SKIP_CONTRADICTED`):
   each message states its own remedy. `REVISION_NOT_OFFERED`: ask Step 6d's question now,
   record the answer, re-run compose. `ANALYSIS_CHANGED_BETWEEN_REVIEWS` is a disclosure: deliver.
-- **About the sizing's inputs.** `SIZING_STALE` (research changed before the review): re-run with
+- **About the sizing's inputs.** `SIZING_STALE` (research changed pre-review): re-run with
   `--replay` as in Step 6d. `SENSITIVITY_STALE`: re-run the Step 6a pipe. `CHECKLIST_STALE`: re-dispatch
   the checklist, or accept it with the reason. `SIZING_UNRESOLVABLE`: restore the research figure the
   sizing named. `SIZING_NOT_CHECKED`: re-run Step 5 with references. `RECORD_CHANGED_AFTER_REVIEW`:
   restore what the review saw, or ask the founder (Step 6d); a replay does not clear it.
-  `SIZING_ALTERED` and `UNIT_CHANGED_AFTER_REJECTION` are disclosures: deliver. Never edit
-  `sizing.json`, the review, or a research figure's unit to make any of these agree.
+  `SIZING_ALTERED` and both `*_CHANGED_AFTER_REJECTION` are disclosures: deliver. Never edit
+  `sizing.json`, the review, or a research figure's unit or `of` to make these agree.
 
 Two codes sit in neither class:
 

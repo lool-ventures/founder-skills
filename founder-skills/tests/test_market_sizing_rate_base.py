@@ -501,3 +501,99 @@ def test_a_proxy_on_another_population_in_words_still_passes(tmp_path: Path) -> 
     )
     rc, out = _size(d, _WIDER)
     assert rc == 0, out
+
+
+_CHANGED = "POPULATION_CHANGED_AFTER_REJECTION"
+
+
+def _small(v: dict[str, Any], **fields: Any) -> None:
+    entry = next(a for a in v["assumptions"] if a["name"] == "small_firm_pct")
+    entry.pop("proxy", None)
+    entry.update(fields)
+
+
+def _refused_two_step(tmp_path: Path) -> Path:
+    d = _two_step_dir(tmp_path)
+    rc, out = _size(d, _TWO_STEP)
+    assert rc == 1 and "E_RATE_BASE_MISMATCH" in out
+    kept = json.loads((d / "handoff" / _RUN / "base_rejections.json").read_text())
+    assert {"param": "segment_pct", "share": "small_firm_pct", "of": "the surveyed sub-market"}.items() <= kept[
+        0
+    ].items()
+    return d
+
+
+def _pages(d: Path) -> tuple[dict[str, Any], str]:
+    _stamp_downstream(d)
+    return _compose(d), visible_text(_html(d))
+
+
+def test_of_rewritten_to_the_base_after_a_refusal_is_disclosed(tmp_path: Path) -> None:
+    """The silent way past the check: rewrite `of` to the base and drop the proxy. The sizing passes as a match,
+    and the refusal kept beside it is what still knows the population the source measured."""
+    d = _refused_two_step(tmp_path)
+    _edit(d, "validation.json", lambda v: _small(v, of="eligible_population"))
+    rc, out = _size(d, _TWO_STEP)
+    assert rc == 0, out
+    assert _checks(d)["segment_pct"]["status"] == "match", "the stamp alone cannot tell"
+    data, html = _pages(d)
+    w = next(w for w in data["validation"]["warnings"] if w["code"] == _CHANGED)
+    assert w["severity"] == "high"
+    for page in (data["report_markdown"], html):
+        assert "measured on the surveyed sub-market" in page
+        assert "check this share before relying on the result" in page
+
+
+def test_the_chain_the_refusal_offers_is_not_reported(tmp_path: Path) -> None:
+    d = _refused_two_step(tmp_path)
+    _edit(d, "validation.json", lambda v: _small(v, of="segment_pct"))
+    rc, out = _size(d, _TWO_STEP)
+    assert rc == 0, out
+    assert _checks(d)["segment_pct"]["status"] == "chain"
+    assert _CHANGED not in _codes(_pages(d)[0])
+
+
+def test_the_population_kept_with_a_proxy_is_not_reported(tmp_path: Path) -> None:
+    """The same `of`, now declared a proxy: the proxy sentence says it, and nothing was rewritten."""
+    d = _refused_two_step(tmp_path)
+    _edit(
+        d,
+        "validation.json",
+        lambda v: _small(v, of="the surveyed sub-market", proxy={"for": "eligible_population", "why": _WHY}),
+    )
+    rc, out = _size(d, _TWO_STEP)
+    assert rc == 0, out
+    data, html = _pages(d)
+    assert _CHANGED not in _codes(data)
+    assert f"as a proxy: {_WHY}." in data["report_markdown"]
+
+
+def test_a_second_rewrite_does_not_hide_the_first(tmp_path: Path) -> None:
+    """Refused, rewritten to the base with a proxy (refused again, with the base as its `of`), then the proxy
+    dropped: the disclosure names the population the share was first refused with."""
+    d = _refused_two_step(tmp_path)
+    _edit(
+        d,
+        "validation.json",
+        lambda v: _small(v, of="eligible_population", proxy={"for": "eligible_population", "why": _WHY}),
+    )
+    rc, out = _size(d, _TWO_STEP)
+    assert rc == 1 and "E_RATE_BASE_PROXY_SELF" in out
+    _edit(d, "validation.json", lambda v: _small(v, of="eligible_population"))
+    rc, out = _size(d, _TWO_STEP)
+    assert rc == 0, out
+    md = _pages(d)[0]["report_markdown"]
+    assert "measured on the surveyed sub-market" in md
+
+
+def test_two_shares_naming_each_other_are_no_chain(tmp_path: Path) -> None:
+    """A chain must reach the base: two shares naming each other are refused, so neither can be the exit."""
+    d = _refused_two_step(tmp_path)
+
+    def edit(v: dict[str, Any]) -> None:
+        _small(v, of="segment_pct")
+        _segment(v, of="small_firm_pct")
+
+    _edit(d, "validation.json", edit)
+    rc, out = _size(d, _TWO_STEP)
+    assert rc == 1 and "E_RATE_BASE_MISMATCH" in out

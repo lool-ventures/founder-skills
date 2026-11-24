@@ -1005,7 +1005,9 @@ def _chart_cross_validation(
 # ---------------------------------------------------------------------------
 
 
-def _chart_confidence_donut(validation: dict[str, Any] | None, sizing: dict[str, Any] | None = None) -> str:
+def _chart_confidence_donut(
+    validation: dict[str, Any] | None, sizing: dict[str, Any] | None = None, changed: list[str] | None = None
+) -> str:
     """Chart 4: Donut chart of the grades the research and the sizing's estimates EARNED.
 
     Counts `_view.assumption_rows`, the same rows report.md's Assumptions section lists, so the two
@@ -1072,6 +1074,10 @@ def _chart_confidence_donut(validation: dict[str, Any] | None, sizing: dict[str,
     # Sources Used sentences, from the same owner.
     for based in _view.base_sentences(validation, sizing):
         notes += f'<p class="estimate-note">{_esc(based)}</p>'
+    # A refused share used under another population: the one integrity code this page states, beside the
+    # proxies, because its silent form (`of` rewritten to the base, no proxy) leaves no proxy sentence to read.
+    for said in changed or []:
+        notes += f'<p class="estimate-note">{_esc(said)}</p>'
 
     return '<div class="chart-container">' + svg + "</div>" + legend + notes
 
@@ -1624,7 +1630,7 @@ def _compose_html(dir_path: str) -> str:
         artifacts["redteam.json"] = _rt_shown
 
     # The same re-checked sizing report.md renders: an edited one is replaced by its recomputation.
-    _sz_render, _ = _view.sizing_integrity(
+    _sz_render, _sz_codes = _view.sizing_integrity(
         dir_path,
         _rt_run_id,
         artifacts.get("sizing.json"),
@@ -1673,7 +1679,9 @@ def _compose_html(dir_path: str) -> str:
         _view.redo_sentence(_view.redo_record(dir_path, _rt_run_id), validation),
         _view.scope_sentence(sizing, validation),
     )
-    confidence_html = _chart_confidence_donut(validation, sizing)
+    confidence_html = _chart_confidence_donut(
+        validation, sizing, [m for c, m in _sz_codes if c == "POPULATION_CHANGED_AFTER_REJECTION"]
+    )
     checklist_html = _checklist_section(checklist)
     _upload_display = _upload_names.for_redteam(artifacts.get("redteam.json"))
     adversarial_html = _chart_adversarial(

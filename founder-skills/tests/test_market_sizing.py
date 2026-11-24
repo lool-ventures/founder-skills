@@ -1279,13 +1279,14 @@ def test_compose_severity_map_complete() -> None:
     # RED_TEAM_RERUN_UNAPPROVED, REVIEW_COPY_MISSING, RED_TEAM_SKIP_CONTRADICTED); +1 for a review
     # from an earlier run of the same analysis (EARLIER_REVIEW_THIS_ANALYSIS); +1 for a founder figure
     # changed after the review without confirmation (FOUNDER_INPUT_REWRITTEN).
-    # +5: the inputs-by-reference integrity codes, each high (none may be accepted away).
+    # +6: the inputs-by-reference integrity codes, each high (none may be accepted away).
     integrity = [
         "SIZING_STALE",
         "SIZING_UNRESOLVABLE",
         "SIZING_ALTERED",
         "RECORD_CHANGED_AFTER_REVIEW",
         "UNIT_CHANGED_AFTER_REJECTION",
+        "POPULATION_CHANGED_AFTER_REJECTION",
         "SENSITIVITY_STALE",
         "SIZING_NOT_CHECKED",
     ]
@@ -1306,7 +1307,7 @@ def test_compose_severity_map_complete() -> None:
     # +1: a comparison redo printed and never used by the sizing. Medium, not acceptable away
     # (test_ms_sizing_redo.py::test_a_redo_never_used_is_disclosed_and_cannot_be_accepted).
     assert sev_map.get("SIZING_REDO_NOT_RUN") == "medium"
-    assert len(sev_map) == 64, f"expected 64 codes, got {len(sev_map)}"
+    assert len(sev_map) == 65, f"expected 65 codes, got {len(sev_map)}"
     for code in expected_codes:
         assert code in sev_map, f"{code} missing from severity map"
     # All values are "high", "medium", or "low"
