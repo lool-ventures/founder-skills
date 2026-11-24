@@ -1281,9 +1281,15 @@ def _population_changes(
     """Each share the base check refused that the sizing now uses under another `of`.
 
     `of` is the record's word for what the source measured, and the refusal is what tempts rewriting it to the
-    base; one rewrite that drops the proxy reads as a match. The exit the refusal itself offers is exempt: `of`
-    naming another share of the same step that is measured on the base (a chain, stamped as one). Compared with
-    the first `of` each share was refused with, so a second rewrite does not hide the first.
+    base; one rewrite that drops the proxy reads as a match. Compared with the first `of` each share was refused
+    with, so a second rewrite does not hide the first, and as bare words, so a respelling is no change. A copy
+    under a new name is the same share when it keeps the refused figure and quote (the unit check matches on
+    the value for the same reason).
+
+    Not reported: the two exits the refusal offers. A different figure with a different quote is new research
+    recorded under the same name. And a chain: `of` naming a share the step already held when it was refused,
+    measured, link by link through such shares, on the base, none of them a 100% share (which selects
+    everything, so a head added at 100% could carry any share).
     """
     first: dict[str, dict[str, Any]] = {}
     for row in _base_rejections(analysis_dir, run_id):
@@ -1293,40 +1299,62 @@ def _population_changes(
     if not first:
         return []
     by_name = {a.get("name"): a for a in _as_list(_as_dict(validation).get("assumptions")) if isinstance(a, dict)}
-    checks = _as_dict(sizing.get("base_checks"))
+    checks = {str(k): _as_dict(v) for k, v in _as_dict(sizing.get("base_checks")).items()}
 
     def _population(of: str) -> str:
         return _label(of, validation) if of in by_name else _founder_prose(of)
 
+    def _full(entry: dict[str, Any]) -> bool:
+        v = _as_number(entry.get("value"))
+        return v is not None and v >= (100 if entry.get("unit") == "percent_points" else 1)
+
+    def _reaches_base(of: str, held: set[str], base_entries: set[str]) -> bool:
+        seen: set[str] = set()
+        while of not in base_entries:
+            head = by_name.get(of)
+            if of in seen or of not in held or not isinstance(head, dict) or _full(head):
+                return False
+            seen.add(of)
+            of = str(head.get("of") or "").strip()
+        return True
+
+    def _words(text: str) -> str:
+        return " ".join(re.findall(r"[a-z0-9]+", text.casefold()))
+
     out: list[tuple[str, str]] = []
+    said: set[str] = set()
     for share, row in sorted(first.items()):
-        now = by_name.get(share)
-        if share not in used or not isinstance(now, dict):
-            continue
-        was_of, now_of = str(row.get("of") or "").strip(), str(now.get("of") or "").strip()
-        if not was_of or now_of == was_of:
-            continue
-        check = _as_dict(checks.get(str(row.get("param"))))
-        base_entries = {str(n) for n in _as_list(check.get("base_entries"))}
-        head = by_name.get(now_of)
-        if (
-            isinstance(head, dict)
-            and head is not now
-            and head.get("name") in used
-            and str(head.get("of") or "").strip() in base_entries
-        ):
-            continue  # the chain exit: measured on what a share of the base picks out
-        base = _label(str(check.get("base") or row.get("param") or ""), validation)
-        out.append(
-            (
-                "POPULATION_CHANGED_AFTER_REJECTION",
-                f"{_label(share, validation)}: the sizing refused to apply this share to {base}, because its "
-                f"record said it was measured on {_population(was_of)}. The record was then changed to say it was "
-                f"measured on {_population(now_of) if now_of else 'nothing'}, and the sizing uses it. What a "
-                f"source measured does not change when the record does; check this share before relying on "
-                f"the result.",
+        was_of = str(row.get("of") or "").strip()
+        quote = str(row.get("quote") or "").strip()
+        for name in sorted(n for n in used if isinstance(n, str)):
+            now = by_name.get(name)
+            if name in said or not isinstance(now, dict):
+                continue
+            same_figure = _same(now.get("value"), row.get("value"))
+            same_quote = str(now.get("quote") or "").strip() == quote
+            if name != share and not (same_figure and quote and same_quote):
+                continue  # another entry, not a copy of the refused one
+            now_of = str(now.get("of") or "").strip()
+            if _words(now_of) == _words(was_of):
+                continue
+            if name == share and not same_figure and not same_quote:
+                continue  # replaced by new research under the same name
+            step = next((c for c in checks.values() if name in _as_dict(c.get("share_values"))), {})
+            base_entries = {str(n) for n in _as_list(step.get("base_entries"))}
+            held = {str(n) for n in _as_list(row.get("step_shares"))} - {share, name}
+            if now_of in held and _reaches_base(now_of, held, base_entries):
+                continue  # the chain the refusal offers
+            said.add(name)
+            base = _label(str(step.get("base") or row.get("param") or ""), validation)
+            out.append(
+                (
+                    "POPULATION_CHANGED_AFTER_REJECTION",
+                    f"{_label(name, validation)}: the sizing refused to apply this share to {base}, because its "
+                    f"record said it was measured on {_population(was_of)}. The record was then changed to say it "
+                    f"was measured on {_population(now_of)}, and the sizing uses it. What a source measured does "
+                    f"not change when the record does; check this share before relying on the result.",
+                )
             )
-        )
     return out
 
 

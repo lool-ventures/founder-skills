@@ -937,16 +937,29 @@ def _keep_unit_rejections(
         print(f"Warning: could not record the unit refusal: {exc}", file=sys.stderr)
 
 
-def _keep_base_rejections(output: str | None, run_id: str | None, refusals: list[dict[str, Any]]) -> None:
-    """Append each share a base check refused, with the `of` it was refused with, to an append-only list.
+def _keep_base_rejections(
+    output: str | None, run_id: str | None, refusals: list[dict[str, Any]], validation: Any
+) -> None:
+    """Append each share a mismatch refused, with the `of`, figure and quote it was refused with and the shares its
+    step held then, to an append-only list.
 
     The refusal is what tempts a rewrite of `of` to the base, and a rewrite that drops the proxy passes as a
     match the stamp cannot tell from research. Kept, the population the share was first recorded as measured
-    on is still known; `_view.sizing_integrity` reports a sizing that uses the share under another one.
+    on is still known; `_view.sizing_integrity` reports a sizing that uses the share under another one. Only the
+    mismatch: a self-proxy refusal's `of` is already the rewrite, so keeping it would flag restoring the truth.
     """
+    by_name = {a.get("name"): a for a in _provenance._assumptions(validation)}
     rows = [
-        {"param": r.get("param"), "share": share, "of": of, "code": r.get("code")}
+        {
+            "param": r.get("param"),
+            "share": share,
+            "of": of,
+            "value": _provenance._as_dict(by_name.get(share)).get("value"),
+            "quote": _provenance._as_dict(by_name.get(share)).get("quote"),
+            "step_shares": list(r.get("step_shares") or []),
+        }
         for r in refusals
+        if r.get("code") == "E_RATE_BASE_MISMATCH"
         for share, of in sorted(_provenance._as_dict(r.get("shares")).items())
     ]
     if not output or not run_id or not rows:
@@ -1040,7 +1053,7 @@ def _resolve_references(
         if prior is not None:
             args.base_checks, base_refusals = _provenance.check_bases(resolved, validation, prior)
             refusals = refusals + base_refusals
-            _keep_base_rejections(args.output, args.run_id, base_refusals)
+            _keep_base_rejections(args.output, args.run_id, base_refusals, validation)
     for r in refusals:
         errors.append(f"{r['code']}: {r['param']}: {r['message']} (remedy: {r['remedy_kind']})")
     numeric = dict(data)

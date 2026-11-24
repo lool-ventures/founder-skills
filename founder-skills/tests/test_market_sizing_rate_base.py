@@ -512,9 +512,11 @@ def _small(v: dict[str, Any], **fields: Any) -> None:
     entry.update(fields)
 
 
-def _refused_two_step(tmp_path: Path) -> Path:
-    d = _two_step_dir(tmp_path)
-    rc, out = _size(d, _TWO_STEP)
+def _refused_two_step(tmp_path: Path, refs: dict[str, Any] | None = None, *extra: dict[str, Any], **small: Any) -> Path:
+    entry = _sourced("small_firm_pct", 40, "percent_points", of="the surveyed sub-market")
+    entry.update(small)
+    d = _run_dir(tmp_path, _record(entry, *extra))
+    rc, out = _size(d, refs or _TWO_STEP)
     assert rc == 1 and "E_RATE_BASE_MISMATCH" in out
     kept = json.loads((d / "handoff" / _RUN / "base_rejections.json").read_text())
     assert {"param": "segment_pct", "share": "small_firm_pct", "of": "the surveyed sub-market"}.items() <= kept[
@@ -597,3 +599,109 @@ def test_two_shares_naming_each_other_are_no_chain(tmp_path: Path) -> None:
     _edit(d, "validation.json", edit)
     rc, out = _size(d, _TWO_STEP)
     assert rc == 1 and "E_RATE_BASE_MISMATCH" in out
+
+
+_QUOTE = "Four in ten of the surveyed firms are small."
+
+
+def _uses(d: Path, refs: dict[str, Any]) -> list[str]:
+    rc, out = _size(d, refs)
+    assert rc == 0, out
+    return _codes(_pages(d)[0])
+
+
+def test_a_copy_of_the_refused_share_under_a_new_name_is_disclosed(tmp_path: Path) -> None:
+    """Renaming is not a way out: the copy keeps the refused figure and its quote, so it is the same share."""
+    d = _refused_two_step(tmp_path, None, quote=_QUOTE)
+    copy = _sourced("small_share", 40, "percent_points", of="eligible_population", quote=_QUOTE)
+    _edit(d, "validation.json", lambda v: v["assumptions"].append(copy))
+    refs = {**_REFS, "segment_pct": _op("multiply", _a("segment_pct"), _a("small_share"))}
+    assert _CHANGED in _uses(d, refs)
+
+
+def test_new_research_under_the_same_name_is_not_disclosed(tmp_path: Path) -> None:
+    """The refusal's first exit: a share whose source measured it on the base, with its own figure and quote."""
+    d = _refused_two_step(tmp_path, None, quote=_QUOTE)
+    _edit(d, "validation.json", lambda v: _small(v, of="eligible_population", value=12, quote="12% of seniors do."))
+    assert _CHANGED not in _uses(d, _TWO_STEP)
+
+
+def test_a_new_figure_without_a_new_quote_is_still_disclosed(tmp_path: Path) -> None:
+    """A changed number alone is not research: the passage stating it is what the exit asks for."""
+    d = _refused_two_step(tmp_path, None, quote=_QUOTE)
+    _edit(d, "validation.json", lambda v: _small(v, of="eligible_population", value=41))
+    assert _CHANGED in _uses(d, _TWO_STEP)
+
+
+def test_restoring_the_population_after_a_self_proxy_refusal_is_not_disclosed(tmp_path: Path) -> None:
+    """A self-proxy refusal's `of` is already the rewrite; keeping it would flag the honest repair."""
+    d = _two_step_dir(tmp_path, of="eligible_population", proxy={"for": "eligible_population", "why": _WHY})
+    rc, out = _size(d, _TWO_STEP)
+    assert rc == 1 and "E_RATE_BASE_PROXY_SELF" in out
+    _edit(
+        d,
+        "validation.json",
+        lambda v: _small(v, of="the surveyed sub-market", proxy={"for": "eligible_population", "why": _WHY}),
+    )
+    assert _CHANGED not in _uses(d, _TWO_STEP)
+
+
+def test_a_respelt_population_with_a_proxy_is_not_disclosed(tmp_path: Path) -> None:
+    d = _refused_two_step(tmp_path)
+    _edit(
+        d,
+        "validation.json",
+        lambda v: _small(v, of="The Surveyed Sub-Market", proxy={"for": "eligible_population", "why": _WHY}),
+    )
+    assert _CHANGED not in _uses(d, _TWO_STEP)
+
+
+def test_a_chain_through_two_shares_held_at_the_refusal_is_not_disclosed(tmp_path: Path) -> None:
+    mid = _sourced("mid_pct", 60, "percent_points", of="segment_pct")
+    refs = {**_REFS, "segment_pct": _op("multiply", _a("segment_pct"), _a("mid_pct"), _a("small_firm_pct"))}
+    d = _refused_two_step(tmp_path, refs, mid)
+    _edit(d, "validation.json", lambda v: _small(v, of="mid_pct"))
+    assert _CHANGED not in _uses(d, refs)
+
+
+def test_a_chain_to_a_head_added_after_the_refusal_is_disclosed(tmp_path: Path) -> None:
+    """A head the step did not hold when it refused the share could be added to carry it."""
+    d = _refused_two_step(tmp_path)
+    head = _sourced("firms_pct", 70, "percent_points", of="eligible_population")
+    refs = {**_REFS, "segment_pct": _op("multiply", _a("segment_pct"), _a("firms_pct"), _a("small_firm_pct"))}
+
+    def edit(v: dict[str, Any]) -> None:
+        v["assumptions"].append(head)
+        _small(v, of="firms_pct")
+
+    _edit(d, "validation.json", edit)
+    assert _CHANGED in _uses(d, refs)
+
+
+def test_a_chain_to_a_100_percent_head_is_disclosed(tmp_path: Path) -> None:
+    """A 100% share selects everything, so a chain through one says nothing about the population."""
+    whole = _sourced("all_pct", 100, "percent_points", of="eligible_population")
+    refs = {**_REFS, "segment_pct": _op("multiply", _a("all_pct"), _a("small_firm_pct"))}
+    d = _refused_two_step(tmp_path, refs, whole)
+    _edit(d, "validation.json", lambda v: _small(v, of="all_pct"))
+    assert _CHANGED in _uses(d, refs)
+
+
+def test_a_chain_reaching_a_new_head_through_a_held_share_is_disclosed(tmp_path: Path) -> None:
+    """Every link must be a share the step held when it refused: rewiring a held share to a new head is no exit."""
+    mid = _sourced("mid_pct", 60, "percent_points", of="segment_pct")
+    head = _sourced("firms_pct", 70, "percent_points", of="eligible_population")
+    refs = {
+        **_REFS,
+        "segment_pct": _op("multiply", _a("segment_pct"), _a("firms_pct"), _a("mid_pct"), _a("small_firm_pct")),
+    }
+    before = {**_REFS, "segment_pct": _op("multiply", _a("segment_pct"), _a("mid_pct"), _a("small_firm_pct"))}
+    d = _refused_two_step(tmp_path, before, mid)
+
+    def edit(v: dict[str, Any]) -> None:
+        v["assumptions"].append(head)
+        next(a for a in v["assumptions"] if a["name"] == "mid_pct")["of"] = "firms_pct"
+        _small(v, of="mid_pct")
+
+    _edit(d, "validation.json", edit)
+    assert _CHANGED in _uses(d, refs)

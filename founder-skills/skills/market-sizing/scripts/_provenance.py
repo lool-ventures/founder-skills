@@ -892,12 +892,14 @@ def check_bases(
                         f"to {base} built from {', '.join(repr(n) for n in base_entries)}. `of` records what the "
                         f"source measured; do not change it to match. "
                         + _chain_hint(others)
-                        + "Either record under the same name a share whose source measured it on that population, "
+                        + "Either record under the same name, with the passage stating it as its `quote`, a share "
+                        "whose source measured it on that population, "
                         'or record on the share `proxy`: {"for": "<the base entry>", '
                         '"why": "<why this share is a fair proxy for it>"}.'
                     ),
                     "remedy_kind": "record_research",
                     "shares": {n: ofs[n] for n in bad},
+                    "step_shares": shares,
                 }
             )
             continue
@@ -948,7 +950,6 @@ def _self_proxy(
             + "Then keep the `proxy` only if that population is not the base's."
         ),
         "remedy_kind": "record_research",
-        "shares": {n: ofs[n] for n in selfish},
     }
 
 
