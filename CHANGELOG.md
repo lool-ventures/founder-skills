@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-11-24 — Market sizing checks what each share was measured on
+
+### Highlights
+
+**Market sizing now checks that each researched share is applied to the population its source measured it
+on.** A share measured on one population and applied to another is refused, unless it is declared a proxy with a
+reason, and the report and its page state each proxy. The run fixes this itself and never asks the founder.
+
+**Competitive positioning no longer stops an unattended run when research finds two competitors are now one
+company.** It keeps them separate, and the report, its page and the explorer say so.
+
 ### Changed
 
 - Competitive positioning: when research finds that two competitors in the set are now one company, a run that
