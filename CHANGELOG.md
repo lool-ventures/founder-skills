@@ -18,7 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   share is declared a proxy for that population with a reason. The report and its page state each proxy and
   its reason, and say when a population count changed under a share that was kept as it was. Declaring a
   proxy, or changing what a share was measured on, after the outside review is reported as a change the review
-  did not see. Neither refusal asks the founder anything: the run records the missing population or proxy
+  did not see. A proxy on a share measured on the population itself is refused as well, since the page would
+  read "measured on X and applied to X as a proxy". None of these refusals asks the founder anything: the run records the missing population or proxy
   itself and re-runs the sizing, so an unattended run completes. Analyses sized before this change replay
   unchecked. `sizing.json` gains a `base_checks` key (additive).
 

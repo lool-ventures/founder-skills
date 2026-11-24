@@ -221,7 +221,7 @@
     "skills/market-sizing/scripts/_ms_gates.py": "802a1a70231baeacdafb84cfcae6f91d771fd4b7a53293d5d40c5967e3f337f8",
     "skills/market-sizing/scripts/_out_guard.py": "69aeb7fec72a66320ff85495df38792d7bd77591ebe85c1cc7fdbe270cb8c95f",
     "skills/market-sizing/scripts/_params.py": "4787542e3bcd20d23f5a77e2f1f61f6c52fdaea5134db0a07208e11a213c4894",
-    "skills/market-sizing/scripts/_provenance.py": "3430835dd22f2257872c7cd33c3de6a6204e15a419ec0dfabd2260f8d409177f",
+    "skills/market-sizing/scripts/_provenance.py": "c088fb347d06dabbac29540a93ca1f2bfdd315ab35a9198987983294bbc4afe5",
     "skills/market-sizing/scripts/_quote_match.py": "e9fdb6400304b5d0bf4f9907e77d6c22062f9d38160f8ebeaac318a3933b1200",
     "skills/market-sizing/scripts/_quote_value.py": "139a9f821890d2fc395fb9e03b288ceb0d5a6969e8ffeaa5a334f20715424b8c",
     "skills/market-sizing/scripts/_redteam_copy.py": "6b6128f7ae58f3ffee8f37f0b5265c18f2342db408adbcd5db2593d6a138c954",

@@ -383,3 +383,75 @@ def test_a_base_moved_twice_keeps_the_figure_it_started_from(tmp_path: Path) -> 
     assert _checks(d)["segment_pct"]["base_changed"] == [
         {"entry": "eligible_population", "from": 41_000_000, "to": 60_000_000}
     ]
+
+
+_TWO_STEP = {**_REFS, "segment_pct": _op("multiply", _a("segment_pct"), _a("small_firm_pct"))}
+
+
+def _two_step_dir(tmp_path: Path, **small: Any) -> Path:
+    """A step of two shares: the first of the base, the second of what the first selects."""
+    entry = _sourced("small_firm_pct", 40, "percent_points", of="the surveyed sub-market")
+    entry.update(small)
+    return _run_dir(tmp_path, _record(entry))
+
+
+def test_a_mismatch_names_the_share_whose_population_it_was_measured_on(tmp_path: Path) -> None:
+    """The exit for "B of what A selects" is `of` naming A. A refusal that offered only a proxy or a different
+    share sent the model to rewrite `of` to the base and add a proxy for it."""
+    d = _two_step_dir(tmp_path)
+    rc, out = _size(d, _TWO_STEP)
+    assert rc == 1 and "E_RATE_BASE_MISMATCH" in out
+    assert "name that share in `of`" in out and "'segment_pct' picks out" in out
+    _edit(
+        d,
+        "validation.json",
+        lambda v: next(a for a in v["assumptions"] if a["name"] == "small_firm_pct").update(of="segment_pct"),
+    )
+    rc, out = _size(d, _TWO_STEP)
+    assert rc == 0, out
+    assert _checks(d)["segment_pct"]["status"] == "chain"
+
+
+def test_a_lone_share_mismatch_offers_no_chain(tmp_path: Path) -> None:
+    d = _wider_dir(tmp_path)
+    rc, out = _size(d, _WIDER)
+    assert rc == 1 and "E_RATE_BASE_MISMATCH" in out and "name that share in `of`" not in out
+
+
+def test_a_proxy_for_the_population_the_share_was_measured_on_is_refused(tmp_path: Path) -> None:
+    """`of` rewritten to the base, plus a proxy for that same entry: the pages would say "measured on X and
+    applied to X as a proxy", and the population the source measured is gone. Refused, never asked."""
+    d = _two_step_dir(tmp_path)
+    before = (d / "sizing.json").read_bytes()
+    _edit(
+        d,
+        "validation.json",
+        lambda v: next(a for a in v["assumptions"] if a["name"] == "small_firm_pct").update(
+            of="eligible_population", proxy={"for": "eligible_population", "why": _WHY}
+        ),
+    )
+    rc, out = _size(d, _TWO_STEP)
+    assert rc == 1 and "E_RATE_BASE_PROXY_SELF" in out and "remedy: record_research" in out
+    assert "'segment_pct' picks out" in out
+    assert (d / "sizing.json").read_bytes() == before
+
+
+def test_a_lone_share_of_the_base_with_a_proxy_for_it_is_refused(tmp_path: Path) -> None:
+    d = _run_dir(tmp_path, _record())
+    _edit(d, "validation.json", lambda v: _segment(v, proxy={"for": "eligible_population", "why": _WHY}))
+    rc, out = _size(d, _REFS)
+    assert rc == 1 and "E_RATE_BASE_PROXY_SELF" in out and "name that share" not in out
+
+
+def test_a_base_population_with_a_proxy_for_itself_is_refused(tmp_path: Path) -> None:
+    refs = {**_REFS, "segment_pct": _op("to_percent", _op("divide", _a("local_users"), _a("eligible_population")))}
+    d = _run_dir(tmp_path, _record(_sourced("local_users", 3_000_000, "count")), refs)
+    _edit(
+        d,
+        "validation.json",
+        lambda v: next(a for a in v["assumptions"] if a["name"] == "eligible_population").update(
+            proxy={"for": "eligible_population", "why": _WHY}
+        ),
+    )
+    rc, out = _size(d, refs)
+    assert rc == 1 and "E_RATE_BASE_PROXY_SELF" in out
