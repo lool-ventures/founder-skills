@@ -2264,7 +2264,7 @@ REFERENCES_CEILING: dict[str, int] = {
     # the sizing's `base_checks` stamp, the record and the stamp `market_sizing.py` checks a share's population by.
     # 60,393 -> 60,625 (+232 B) the same day: a ratio share, a share divided from two counts, and the `chain`
     # status, after the post-build review reproduced each as a way past the check.
-    "market-sizing": 60_625,
+    "market-sizing": 60_621,
     # fmr raised to document `graded_against` on the three producer outputs that stamp it — a new
     # artifact field is not discoverable from a schema doc that omits it, and the field exists to make
     # staleness detectable at all (run_id parity cannot see corrections applied within a run).

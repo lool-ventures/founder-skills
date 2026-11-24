@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from typing import Any
 
 import _params as P
@@ -806,7 +807,18 @@ def check_bases(
             # One population over another: the rate names its population by those entries.
             stood = {n: si for n in populations if (si := _proxy(by_name[n])) and si[0] in base_entries}
             if selfish := [n for n in stood if n in base_entries]:
-                refusals.append(_self_proxy(rate, selfish, {n: n for n in selfish}, [], base, base_entries))
+                refusals.append(
+                    {
+                        "code": "E_RATE_BASE_PROXY_SELF",
+                        "param": rate,
+                        "message": (
+                            f"{', '.join(repr(n) for n in selfish)} is an entry {base} is built from, and it carries "
+                            f"a `proxy` for that base: a population is no proxy for itself. Remove the `proxy`, or "
+                            f"build {rate} over another population and record the proxy on that one."
+                        ),
+                        "remedy_kind": "record_research",
+                    }
+                )
                 continue
             if not any(n in base_entries for n in populations) and not stood:
                 refusals.append(
@@ -858,15 +870,17 @@ def check_bases(
         on_base = [n for n in shares if ofs[n] in base_entries]
         chained = [n for n in shares if ofs[n] in shares and ofs[n] != n]
         stood = {n: si for n in shares if (si := _proxy(by_name[n])) and si[0] in base_entries}
-        if selfish := [n for n in stood if ofs[n] in base_entries]:
-            refusals.append(
-                _self_proxy(rate, selfish, ofs, [n for n in shares if n not in selfish], base, base_entries)
-            )
+        base_words = {_words(n) for n in base_entries} | {
+            _words(str(by_name[n].get("label") or "")) for n in base_entries
+        } - {""}
+        if selfish := [n for n in stood if ofs[n] in base_entries or _words(ofs[n]) in base_words]:
+            heads = [n for n in on_base if n not in selfish]
+            refusals.append(_self_proxy(rate, selfish, ofs, heads, base, base_entries))
             continue
         unmatched = [n for n in shares if n not in on_base and n not in chained and n not in stood]
         if unmatched or not (on_base or stood):
             bad = unmatched or shares
-            others = [n for n in shares if n not in bad]
+            others = [n for n in on_base if n not in bad]
             refusals.append(
                 {
                     "code": "E_RATE_BASE_MISMATCH",
@@ -894,8 +908,15 @@ def check_bases(
     return stamp, refusals
 
 
+def _words(text: str) -> str:
+    """A name or a label as bare words, so an `of` restating the base in another case or spelling still reads
+    as the base."""
+    return " ".join(re.findall(r"[a-z0-9]+", text.casefold()))
+
+
 def _chain_hint(others: list[str]) -> str:
-    """The exit for a share measured on what another share of the same rate selects ("B of what A selects")."""
+    """The exit for a share measured on what another share of the same rate selects ("B of what A selects").
+    Offered only for shares measured on the base, so the hint never points at a share that leads nowhere."""
     if not others:
         return ""
     names = " or ".join(repr(n) for n in others)
@@ -908,17 +929,18 @@ def _chain_hint(others: list[str]) -> str:
 def _self_proxy(
     rate: str, selfish: list[str], ofs: dict[str, str], others: list[str], base: str, base_entries: list[str]
 ) -> dict[str, Any]:
-    """A proxy on an entry measured on the base itself. A share of the base needs no proxy, so one there says
-    only that `of` was rewritten to the base: the sentence it would put on both pages ("measured on X and
-    applied to X as a proxy") states nothing, and the population the source measured is lost."""
+    """A proxy on a share whose `of` is the base itself (its entry name, or its name or label in other words).
+    A share of the base needs no proxy, so one there says only that `of` was rewritten to the base: the sentence
+    it would put on both pages ("measured on X and applied to X as a proxy") states nothing, and the population
+    the source measured is lost."""
     return {
         "code": "E_RATE_BASE_PROXY_SELF",
         "param": rate,
         "message": (
-            f"{'; '.join(repr(n) + ' records `of` ' + repr(ofs[n]) for n in selfish)}, an entry {base} is built from "
-            f"({', '.join(repr(n) for n in base_entries)}), and also a `proxy` for it. A share measured on the base "
-            f"needs no proxy; a proxy is for a share measured on another population. `of` records what the source "
-            f"measured: write it as the source states it. "
+            f"{'; '.join(repr(n) + ' records `of` ' + repr(ofs[n]) for n in selfish)}, the population {base} is "
+            f"built from ({', '.join(repr(n) for n in base_entries)}), and also a `proxy` for it. A share measured on "
+            f"the base needs no proxy; a proxy is for a share measured on another population. `of` records what "
+            f"the source measured: write it as the source states it. "
             + _chain_hint(others)
             + "Then keep the `proxy` only if that population is not the base's."
         ),

@@ -438,9 +438,11 @@ def test_a_proxy_for_the_population_the_share_was_measured_on_is_refused(tmp_pat
 
 def test_a_lone_share_of_the_base_with_a_proxy_for_it_is_refused(tmp_path: Path) -> None:
     d = _run_dir(tmp_path, _record())
+    before = (d / "sizing.json").read_bytes()
     _edit(d, "validation.json", lambda v: _segment(v, proxy={"for": "eligible_population", "why": _WHY}))
     rc, out = _size(d, _REFS)
     assert rc == 1 and "E_RATE_BASE_PROXY_SELF" in out and "name that share" not in out
+    assert (d / "sizing.json").read_bytes() == before
 
 
 def test_a_base_population_with_a_proxy_for_itself_is_refused(tmp_path: Path) -> None:
@@ -453,5 +455,49 @@ def test_a_base_population_with_a_proxy_for_itself_is_refused(tmp_path: Path) ->
             proxy={"for": "eligible_population", "why": _WHY}
         ),
     )
+    before = (d / "sizing.json").read_bytes()
     rc, out = _size(d, refs)
     assert rc == 1 and "E_RATE_BASE_PROXY_SELF" in out
+    assert "a population is no proxy for itself" in out and "Remove the `proxy`" in out and "`of`" not in out
+    assert (d / "sizing.json").read_bytes() == before
+
+
+def test_an_of_restating_the_base_in_other_words_is_still_the_base(tmp_path: Path) -> None:
+    """Exact names only would let `of` echo the base's name in another case, or its label, and keep the proxy."""
+    for i, of in enumerate(("Eligible Population", "eligible-population")):
+        (tmp_path / str(i)).mkdir()
+        d = _run_dir(tmp_path / str(i), _record())
+        before = (d / "sizing.json").read_bytes()
+        _edit(
+            d, "validation.json", lambda v, of=of: _segment(v, of=of, proxy={"for": "eligible_population", "why": _WHY})
+        )
+        rc, out = _size(d, _REFS)
+        assert rc == 1 and "E_RATE_BASE_PROXY_SELF" in out, of
+        assert (d / "sizing.json").read_bytes() == before
+
+
+def test_an_of_naming_the_base_by_its_label_is_still_the_base(tmp_path: Path) -> None:
+    label = "Seniors living at home"
+
+    def edit(v: dict[str, Any]) -> None:
+        next(a for a in v["assumptions"] if a["name"] == "eligible_population")["label"] = label
+        _segment(v, of=label.upper(), proxy={"for": "eligible_population", "why": _WHY})
+
+    d = _run_dir(tmp_path, _record())
+    _edit(d, "validation.json", edit)
+    rc, out = _size(d, _REFS)
+    assert rc == 1 and "E_RATE_BASE_PROXY_SELF" in out
+
+
+def test_a_proxy_on_another_population_in_words_still_passes(tmp_path: Path) -> None:
+    """Words that name another population, even one that mentions the base, are a real proxy."""
+    d = _wider_dir(tmp_path)
+    _edit(
+        d,
+        "validation.json",
+        lambda v: _segment(
+            v, of="the surveyed part of the wider population", proxy={"for": "wider_population", "why": _WHY}
+        ),
+    )
+    rc, out = _size(d, _WIDER)
+    assert rc == 0, out
