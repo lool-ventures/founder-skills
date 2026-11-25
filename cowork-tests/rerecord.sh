@@ -162,8 +162,8 @@ echo "cowork-harness $ver"
 #     `subagent_tool_absent`, and it lives in upstream's test suite, not in any CLI surface. At the time
 #     neither `lint`, nor the bundled `scenario.py lint`, nor `record --dry-run` caught the class — the
 #     linters' tier table has no `cowork` row, and the refusal lived past the loader. (History: since
-#     4.1.0 `record --dry-run` lists such an assert under `inputErrors[]` on both arms, and CI and the
-#     cost pre-flight below gate on that list, so this floor is no longer the only guard.) Full analysis:
+#     4.1.0 `record --dry-run` reports such an assert on both arms, under `refusals[]` with exit 1
+#     since 5.0.0, and CI and the cost pre-flight below gate on it, so this floor is no longer the only guard.) Full analysis:
 #     docs/internal/2026-08-28-cowork-harness-2.5.0-adoption-plan.md.
 #   * 2.4.0 is required because it CHANGES WHAT A HOSTLOOP RECORDING RECORDS. The workspace bash
 #     tool's cwd moves from `<session>/mnt/<first-folder-else-outputs>` to the bare session root
